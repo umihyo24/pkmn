@@ -12,32 +12,41 @@
 
       <section id="start-screen" class="overlay active">
         <h1>Myth Meadow</h1>
-        <p>草原を探索し、3回勝利しよう！</p>
+        <p>草原を探索し、野生モンスターを2種類捕獲しよう！</p>
         <button id="start-btn">Start</button>
       </section>
 
       <section id="hud" class="panel hidden" aria-live="polite">
+        <div>Active: <span id="hud-monster-name">-</span></div>
         <div>HP: <span id="hud-hp">0</span>/<span id="hud-max-hp">0</span></div>
-        <div>Wins: <span id="hud-wins">0</span>/3</div>
+        <div>Captured: <span id="hud-captured">0</span>/2</div>
       </section>
 
       <section id="battle-panel" class="overlay hidden" aria-live="polite">
         <div class="battle-card">
-          <h2>Encounter!</h2>
+          <h2>Wild Encounter</h2>
           <div class="stats-row">
             <div>
-              <h3>Enemy: <span id="enemy-name">-</span></h3>
+              <h3><span id="enemy-name">-</span></h3>
               <p>HP: <span id="enemy-hp">0</span>/<span id="enemy-max-hp">0</span></p>
             </div>
             <div>
-              <h3>Player</h3>
+              <h3><span id="player-name">-</span></h3>
               <p>HP: <span id="player-hp">0</span>/<span id="player-max-hp">0</span></p>
             </div>
           </div>
-          <div class="actions">
-            <button id="fight-btn">Fight</button>
+
+          <div class="actions-grid">
+            <button id="move-strike-btn">Strike</button>
+            <button id="move-heavy-btn">Heavy Hit</button>
+            <button id="move-guard-btn">Guard</button>
+            <button id="capture-btn">Capture Orb</button>
+          </div>
+
+          <div class="minor-actions">
             <button id="run-btn">Run</button>
           </div>
+
           <div id="battle-log" class="log"></div>
         </div>
       </section>

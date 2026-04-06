@@ -3,8 +3,6 @@
   --panel: rgba(9, 25, 43, 0.9);
   --text: #e0fbfc;
   --accent: #ffb703;
-  --danger: #ff6b6b;
-  --ok: #80ed99;
 }
 
 * {
@@ -64,10 +62,11 @@ body {
   border: 2px solid #778da9;
   background: var(--panel);
   font-weight: bold;
+  flex-wrap: wrap;
 }
 
 .battle-card {
-  width: min(520px, 90%);
+  width: min(560px, 95%);
   background: #14213d;
   border: 2px solid #8d99ae;
   border-radius: 10px;
@@ -79,18 +78,24 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
-.actions {
+.actions-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.minor-actions {
   margin-top: 8px;
-  display: flex;
-  gap: 10px;
 }
 
 .log {
   margin-top: 10px;
-  min-height: 70px;
-  max-height: 120px;
+  min-height: 78px;
+  max-height: 130px;
   overflow-y: auto;
   border: 1px solid #415a77;
   padding: 8px;
@@ -101,25 +106,30 @@ body {
 button {
   border: 0;
   border-radius: 8px;
-  padding: 10px 16px;
+  padding: 10px 12px;
   font-weight: bold;
   cursor: pointer;
   background: var(--accent);
   color: #111;
 }
 
-button:hover,
-button:focus-visible {
-  filter: brightness(1.05);
-  outline: 2px solid #fff;
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
-#end-title {
-  margin-bottom: 8px;
+button:hover:not(:disabled),
+button:focus-visible:not(:disabled) {
+  filter: brightness(1.05);
+  outline: 2px solid #fff;
 }
 
 @media (max-width: 700px) {
   #game-root {
     width: 96vw;
+  }
+
+  .actions-grid {
+    grid-template-columns: 1fr;
   }
 }

@@ -9,22 +9,60 @@ const CONFIG = {
     chanceOnGrassMove: 0.18,
     cooldownMoves: 4,
   },
-  player: {
-    maxHp: 30,
-    startX: 2,
-    startY: 2,
-    damageMin: 4,
-    damageMax: 8,
+  battle: {
+    runSuccessRate: 0.45,
+    guardMultiplier: 0.45,
+    captureBaseChance: 0.2,
+    captureLowHpBonus: 0.6,
+    captureGoalUnique: 2,
   },
-  enemy: {
-    hpMin: 14,
-    hpMax: 24,
-    damageMin: 3,
-    damageMax: 7,
-    names: ["Mossling", "Nibfox", "Pebblit", "Gloamoth"],
+  moves: {
+    strike: { name: "Strike", power: 1, accuracy: 0.95, guard: false },
+    heavy: { name: "Heavy Hit", power: 1.45, accuracy: 0.68, guard: false },
+    guard: { name: "Guard", power: 0, accuracy: 1, guard: true },
   },
-  runSuccessRate: 0.55,
-  winsToClear: 3,
+  monsters: {
+    starter: "emberfin",
+    entries: {
+      emberfin: {
+        key: "emberfin",
+        name: "Emberfin",
+        maxHp: 34,
+        attack: 11,
+        defense: 8,
+        sprite: "monster_emberfin",
+        moves: ["strike", "heavy", "guard"],
+      },
+      mossbite: {
+        key: "mossbite",
+        name: "Mossbite",
+        maxHp: 32,
+        attack: 10,
+        defense: 9,
+        sprite: "monster_mossbite",
+        moves: ["strike", "guard"],
+      },
+      voltwig: {
+        key: "voltwig",
+        name: "Voltwig",
+        maxHp: 28,
+        attack: 12,
+        defense: 7,
+        sprite: "monster_voltwig",
+        moves: ["strike", "heavy"],
+      },
+      pebloop: {
+        key: "pebloop",
+        name: "Pebloop",
+        maxHp: 36,
+        attack: 9,
+        defense: 10,
+        sprite: "monster_pebloop",
+        moves: ["strike", "guard"],
+      },
+    },
+    wildPool: ["mossbite", "voltwig", "pebloop"],
+  },
 };
 
 // Asset references are centralized; game works even if files are missing.
@@ -34,6 +72,10 @@ const ASSETS = {
     grass: "assets/grass.png",
     ground: "assets/ground.png",
     rock: "assets/rock.png",
+    monster_emberfin: "assets/monster_emberfin.png",
+    monster_mossbite: "assets/monster_mossbite.png",
+    monster_voltwig: "assets/monster_voltwig.png",
+    monster_pebloop: "assets/monster_pebloop.png",
   },
 };
 
@@ -51,14 +93,19 @@ const DOM = {
   endScreen: document.getElementById("end-screen"),
   startBtn: document.getElementById("start-btn"),
   restartBtn: document.getElementById("restart-btn"),
-  fightBtn: document.getElementById("fight-btn"),
+  moveStrikeBtn: document.getElementById("move-strike-btn"),
+  moveHeavyBtn: document.getElementById("move-heavy-btn"),
+  moveGuardBtn: document.getElementById("move-guard-btn"),
+  captureBtn: document.getElementById("capture-btn"),
   runBtn: document.getElementById("run-btn"),
   hudHp: document.getElementById("hud-hp"),
   hudMaxHp: document.getElementById("hud-max-hp"),
-  hudWins: document.getElementById("hud-wins"),
+  hudCaptured: document.getElementById("hud-captured"),
+  hudMonsterName: document.getElementById("hud-monster-name"),
   enemyName: document.getElementById("enemy-name"),
   enemyHp: document.getElementById("enemy-hp"),
   enemyMaxHp: document.getElementById("enemy-max-hp"),
+  playerName: document.getElementById("player-name"),
   playerHp: document.getElementById("player-hp"),
   playerMaxHp: document.getElementById("player-max-hp"),
   battleLog: document.getElementById("battle-log"),
@@ -75,18 +122,19 @@ const gameState = {
   phase: "start",
   keysDown: {},
   moveTimer: 0,
-  wins: 0,
   encounterCooldown: 0,
   map: createMap(),
   player: {
-    x: CONFIG.player.startX,
-    y: CONFIG.player.startY,
-    hp: CONFIG.player.maxHp,
-    maxHp: CONFIG.player.maxHp,
+    x: 2,
+    y: 2,
   },
+  playerMonster: createMonsterInstance(CONFIG.monsters.starter),
+  collection: [],
   battle: {
     enemy: null,
     log: [],
+    guardActive: false,
+    actionLocked: false,
   },
   assets: {
     images: {},
@@ -116,6 +164,10 @@ function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function randomChoice(items) {
+  return items[randInt(0, items.length - 1)];
+}
+
 function createMap() {
   const rows = [];
   for (let y = 0; y < CONFIG.mapRows; y += 1) {
@@ -134,6 +186,24 @@ function createMap() {
   return rows;
 }
 
+function createMonsterInstance(monsterKey) {
+  const base = CONFIG.monsters.entries[monsterKey];
+  return {
+    key: base.key,
+    name: base.name,
+    sprite: base.sprite,
+    maxHp: base.maxHp,
+    hp: base.maxHp,
+    attack: base.attack,
+    defense: base.defense,
+    moves: [...base.moves],
+  };
+}
+
+function createWildMonster() {
+  return createMonsterInstance(randomChoice(CONFIG.monsters.wildPool));
+}
+
 function getTileAt(x, y) {
   return gameState.map[y]?.[x] ?? TILE.ROCK;
 }
@@ -142,64 +212,64 @@ function isWalkable(x, y) {
   return getTileAt(x, y) !== TILE.ROCK;
 }
 
+function uniqueCaptureCount() {
+  const keys = new Set(gameState.collection.map((m) => m.key));
+  return keys.size;
+}
+
 function pushBattleLog(message) {
   gameState.battle.log.push(message);
-  if (gameState.battle.log.length > 6) {
+  if (gameState.battle.log.length > 7) {
     gameState.battle.log.shift();
   }
 }
 
-function beginBattle() {
-  const enemyHp = randInt(CONFIG.enemy.hpMin, CONFIG.enemy.hpMax);
-  const enemyName = CONFIG.enemy.names[randInt(0, CONFIG.enemy.names.length - 1)];
-  gameState.battle.enemy = {
-    name: enemyName,
-    hp: enemyHp,
-    maxHp: enemyHp,
-  };
+function startBattle() {
+  gameState.battle.enemy = createWildMonster();
   gameState.battle.log = [];
-  pushBattleLog(`${enemyName} があらわれた！`);
+  gameState.battle.guardActive = false;
+  gameState.battle.actionLocked = false;
+  pushBattleLog(`野生の ${gameState.battle.enemy.name} が現れた！`);
   gameState.phase = "battle";
 }
 
-function resetRun() {
+function leaveBattle() {
   gameState.phase = "playing";
   gameState.battle.enemy = null;
   gameState.battle.log = [];
+  gameState.battle.guardActive = false;
+  gameState.battle.actionLocked = false;
 }
 
 function startGame() {
   gameState.phase = "playing";
-  gameState.wins = 0;
+  gameState.player.x = 2;
+  gameState.player.y = 2;
   gameState.encounterCooldown = 0;
-  gameState.player.x = CONFIG.player.startX;
-  gameState.player.y = CONFIG.player.startY;
-  gameState.player.hp = gameState.player.maxHp;
-  resetRun();
+  gameState.playerMonster = createMonsterInstance(CONFIG.monsters.starter);
+  gameState.collection = [];
+  leaveBattle();
 }
 
 function endGame(cleared) {
   gameState.phase = "gameover";
   DOM.endTitle.textContent = cleared ? "Clear!" : "Game Over";
   DOM.endMessage.textContent = cleared
-    ? `あなたは ${gameState.wins} 勝して草原を制した！`
-    : "力尽きてしまった… もう一度挑戦しよう。";
+    ? `捕獲成功！ ${uniqueCaptureCount()} 種類を集めた。`
+    : "アクティブモンスターが戦闘不能になった。再挑戦しよう。";
 }
 
 function tryMovePlayer(dx, dy) {
   const nx = gameState.player.x + dx;
   const ny = gameState.player.y + dy;
-  if (!isWalkable(nx, ny)) {
-    return false;
-  }
+  if (!isWalkable(nx, ny)) return false;
   gameState.player.x = nx;
   gameState.player.y = ny;
   return true;
 }
 
 function tryEncounterAfterMove() {
-  const onGrass = getTileAt(gameState.player.x, gameState.player.y) === TILE.GRASS;
-  if (!onGrass) return;
+  if (getTileAt(gameState.player.x, gameState.player.y) !== TILE.GRASS) return;
 
   if (gameState.encounterCooldown > 0) {
     gameState.encounterCooldown -= 1;
@@ -208,58 +278,139 @@ function tryEncounterAfterMove() {
 
   if (Math.random() < CONFIG.encounter.chanceOnGrassMove) {
     gameState.encounterCooldown = CONFIG.encounter.cooldownMoves;
-    beginBattle();
+    startBattle();
   }
 }
 
-function resolvePlayerFight() {
-  const enemy = gameState.battle.enemy;
-  if (!enemy) return;
+function doesMoveHit(moveKey) {
+  const move = CONFIG.moves[moveKey];
+  return Math.random() <= move.accuracy;
+}
 
-  const playerDmg = randInt(CONFIG.player.damageMin, CONFIG.player.damageMax);
-  enemy.hp = Math.max(0, enemy.hp - playerDmg);
-  pushBattleLog(`あなたの攻撃！ ${playerDmg} ダメージ。`);
+function computeDamage(attacker, defender, moveKey, guarded) {
+  const move = CONFIG.moves[moveKey];
+  const variance = randInt(85, 100) / 100;
+  const raw = Math.max(1, Math.floor((attacker.attack * move.power - defender.defense * 0.45) * variance));
+  return guarded ? Math.max(1, Math.floor(raw * CONFIG.battle.guardMultiplier)) : raw;
+}
+
+function computeCaptureChance(enemy) {
+  const missingRatio = (enemy.maxHp - enemy.hp) / enemy.maxHp;
+  return Math.min(0.95, CONFIG.battle.captureBaseChance + missingRatio * CONFIG.battle.captureLowHpBonus);
+}
+
+function collectMonster(monster) {
+  const exists = gameState.collection.some((m) => m.key === monster.key);
+  if (!exists) {
+    gameState.collection.push({ key: monster.key, name: monster.name });
+    return true;
+  }
+  return false;
+}
+
+function afterBattleWinCheck() {
+  if (uniqueCaptureCount() >= CONFIG.battle.captureGoalUnique) {
+    endGame(true);
+  } else {
+    leaveBattle();
+  }
+}
+
+function processEnemyTurn() {
+  const enemy = gameState.battle.enemy;
+  if (!enemy || gameState.phase !== "battle") return;
+
+  const moveKey = randomChoice(enemy.moves);
+  const move = CONFIG.moves[moveKey];
+
+  if (move.guard) {
+    pushBattleLog(`${enemy.name} は身構えている…`);
+    return;
+  }
+
+  if (!doesMoveHit(moveKey)) {
+    pushBattleLog(`${enemy.name} の ${move.name} は外れた！`);
+    return;
+  }
+
+  const damage = computeDamage(enemy, gameState.playerMonster, moveKey, gameState.battle.guardActive);
+  gameState.playerMonster.hp = Math.max(0, gameState.playerMonster.hp - damage);
+  pushBattleLog(`${enemy.name} の ${move.name}！ ${damage} ダメージ。`);
+
+  if (gameState.playerMonster.hp <= 0) {
+    endGame(false);
+  }
+}
+
+function useMove(moveKey) {
+  if (gameState.phase !== "battle" || gameState.battle.actionLocked) return;
+
+  const enemy = gameState.battle.enemy;
+  const move = CONFIG.moves[moveKey];
+  gameState.battle.guardActive = false;
+
+  if (move.guard) {
+    gameState.battle.guardActive = true;
+    pushBattleLog(`${gameState.playerMonster.name} はガード態勢！`);
+    processEnemyTurn();
+    gameState.battle.guardActive = false;
+    return;
+  }
+
+  if (!doesMoveHit(moveKey)) {
+    pushBattleLog(`${gameState.playerMonster.name} の ${move.name} は外れた！`);
+    processEnemyTurn();
+    return;
+  }
+
+  const damage = computeDamage(gameState.playerMonster, enemy, moveKey, false);
+  enemy.hp = Math.max(0, enemy.hp - damage);
+  pushBattleLog(`${gameState.playerMonster.name} の ${move.name}！ ${damage} ダメージ。`);
 
   if (enemy.hp <= 0) {
-    gameState.wins += 1;
-    pushBattleLog(`${enemy.name} を倒した！`);
-    if (gameState.wins >= CONFIG.winsToClear) {
-      endGame(true);
-      return;
-    }
-    resetRun();
+    pushBattleLog(`${enemy.name} を倒した。`);
+    leaveBattle();
     return;
   }
 
-  const enemyDmg = randInt(CONFIG.enemy.damageMin, CONFIG.enemy.damageMax);
-  gameState.player.hp = Math.max(0, gameState.player.hp - enemyDmg);
-  pushBattleLog(`${enemy.name} の反撃！ ${enemyDmg} ダメージ。`);
-
-  if (gameState.player.hp <= 0) {
-    endGame(false);
-  }
+  processEnemyTurn();
 }
 
-function resolveRunAttempt() {
+function tryCapture() {
+  if (gameState.phase !== "battle" || gameState.battle.actionLocked) return;
+
   const enemy = gameState.battle.enemy;
-  if (!enemy) return;
+  const chance = computeCaptureChance(enemy);
+  const success = Math.random() < chance;
 
-  if (Math.random() < CONFIG.runSuccessRate) {
-    pushBattleLog("うまく逃げ切った！");
-    resetRun();
+  if (success) {
+    const isNew = collectMonster(enemy);
+    pushBattleLog(`Capture Orb 成功！ ${enemy.name} を捕獲した。`);
+    if (!isNew) {
+      pushBattleLog("既に図鑑登録済みのモンスターだった。");
+    }
+    afterBattleWinCheck();
     return;
   }
 
-  pushBattleLog("逃走失敗！");
-  const enemyDmg = randInt(CONFIG.enemy.damageMin, CONFIG.enemy.damageMax);
-  gameState.player.hp = Math.max(0, gameState.player.hp - enemyDmg);
-  pushBattleLog(`${enemy.name} の攻撃！ ${enemyDmg} ダメージ。`);
-  if (gameState.player.hp <= 0) {
-    endGame(false);
-  }
+  pushBattleLog("Capture Orb は弾かれた！");
+  processEnemyTurn();
 }
 
-// Pure-ish update step: logic only.
+function tryRun() {
+  if (gameState.phase !== "battle" || gameState.battle.actionLocked) return;
+
+  if (Math.random() < CONFIG.battle.runSuccessRate) {
+    pushBattleLog("無事に離脱した。\n");
+    leaveBattle();
+    return;
+  }
+
+  pushBattleLog("離脱失敗！");
+  processEnemyTurn();
+}
+
+// Pure logic update step.
 function update(deltaMs) {
   if (gameState.phase !== "playing") return;
 
@@ -304,53 +455,114 @@ function drawFallbackTile(type, x, y, size) {
   }
 }
 
-function drawImageWithFallback(assetKey, x, y, size, fallbackFn) {
+function drawImageWithFallback(assetKey, x, y, width, height, fallbackFn) {
   const asset = gameState.assets.images[assetKey];
   if (asset && asset.loaded && !asset.failed) {
-    ctx.drawImage(asset.img, x, y, size, size);
+    ctx.drawImage(asset.img, x, y, width, height);
   } else {
     fallbackFn();
   }
 }
 
-function drawPlayer(px, py, size) {
-  drawImageWithFallback("player", px, py, size, () => {
+function drawPlayer(x, y, size) {
+  drawImageWithFallback("player", x, y, size, size, () => {
     ctx.fillStyle = "#ffcf56";
-    ctx.fillRect(px + 8, py + 4, 16, 24);
+    ctx.fillRect(x + 8, y + 4, 16, 24);
     ctx.fillStyle = "#2a2a2a";
-    ctx.fillRect(px + 10, py + 8, 3, 3);
-    ctx.fillRect(px + 19, py + 8, 3, 3);
+    ctx.fillRect(x + 10, y + 8, 3, 3);
+    ctx.fillRect(x + 19, y + 8, 3, 3);
   });
 }
 
-function renderMap() {
+function drawMonsterFallback(monsterKey, x, y, width, height, facingLeft) {
+  const styles = {
+    emberfin: { body: "#f3722c", accent: "#ffe066" },
+    mossbite: { body: "#43aa8b", accent: "#90be6d" },
+    voltwig: { body: "#577590", accent: "#f9c74f" },
+    pebloop: { body: "#7d8597", accent: "#adb5bd" },
+  };
+  const style = styles[monsterKey] || { body: "#888", accent: "#ddd" };
+  const dir = facingLeft ? -1 : 1;
+
+  ctx.save();
+  ctx.translate(x + width / 2, y + height / 2);
+  ctx.scale(dir, 1);
+  ctx.translate(-(x + width / 2), -(y + height / 2));
+
+  ctx.fillStyle = style.body;
+  ctx.fillRect(x + 16, y + 20, width - 32, height - 30);
+  ctx.fillStyle = style.accent;
+  ctx.beginPath();
+  ctx.arc(x + width / 2, y + 18, 20, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#111";
+  ctx.fillRect(x + width / 2 + 4, y + 14, 5, 5);
+
+  ctx.restore();
+}
+
+function drawMonsterSprite(monster, x, y, width, height, facingLeft = false) {
+  drawImageWithFallback(monster.sprite, x, y, width, height, () => {
+    drawMonsterFallback(monster.key, x, y, width, height, facingLeft);
+  });
+}
+
+function drawFieldMap() {
   const ts = CONFIG.tileSize;
   for (let y = 0; y < CONFIG.mapRows; y += 1) {
     for (let x = 0; x < CONFIG.mapCols; x += 1) {
       const tile = gameState.map[y][x];
       const px = x * ts;
       const py = y * ts;
-
       if (tile === TILE.GROUND) {
-        drawImageWithFallback("ground", px, py, ts, () => drawFallbackTile(TILE.GROUND, px, py, ts));
+        drawImageWithFallback("ground", px, py, ts, ts, () => drawFallbackTile(TILE.GROUND, px, py, ts));
       } else if (tile === TILE.GRASS) {
-        drawImageWithFallback("grass", px, py, ts, () => drawFallbackTile(TILE.GRASS, px, py, ts));
+        drawImageWithFallback("grass", px, py, ts, ts, () => drawFallbackTile(TILE.GRASS, px, py, ts));
       } else {
-        drawImageWithFallback("rock", px, py, ts, () => drawFallbackTile(TILE.ROCK, px, py, ts));
+        drawImageWithFallback("rock", px, py, ts, ts, () => drawFallbackTile(TILE.ROCK, px, py, ts));
       }
     }
   }
 }
 
+function drawBattleBackdrop() {
+  ctx.fillStyle = "rgba(3, 13, 23, 0.65)";
+  ctx.fillRect(0, 0, CONFIG.canvas.width, CONFIG.canvas.height);
+
+  ctx.fillStyle = "#2a9d8f";
+  ctx.beginPath();
+  ctx.ellipse(150, 294, 110, 40, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#6d6875";
+  ctx.beginPath();
+  ctx.ellipse(470, 166, 110, 40, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawBattleMonsters() {
+  const enemy = gameState.battle.enemy;
+  if (!enemy) return;
+
+  drawMonsterSprite(enemy, 390, 80, 160, 140, true);
+  drawMonsterSprite(gameState.playerMonster, 60, 210, 180, 160, false);
+}
+
 // Rendering step: visual updates only.
 function render() {
   ctx.clearRect(0, 0, CONFIG.canvas.width, CONFIG.canvas.height);
-  renderMap();
+  drawFieldMap();
   drawPlayer(gameState.player.x * CONFIG.tileSize, gameState.player.y * CONFIG.tileSize, CONFIG.tileSize);
 
-  DOM.hudHp.textContent = gameState.player.hp;
-  DOM.hudMaxHp.textContent = gameState.player.maxHp;
-  DOM.hudWins.textContent = gameState.wins;
+  if (gameState.phase === "battle") {
+    drawBattleBackdrop();
+    drawBattleMonsters();
+  }
+
+  DOM.hudMonsterName.textContent = gameState.playerMonster.name;
+  DOM.hudHp.textContent = gameState.playerMonster.hp;
+  DOM.hudMaxHp.textContent = gameState.playerMonster.maxHp;
+  DOM.hudCaptured.textContent = uniqueCaptureCount();
 
   const isStart = gameState.phase === "start";
   const isPlaying = gameState.phase === "playing";
@@ -363,12 +575,20 @@ function render() {
   DOM.battlePanel.classList.toggle("hidden", !isBattle);
   DOM.endScreen.classList.toggle("hidden", !isGameOver);
 
+  const actionsEnabled = isBattle && !gameState.battle.actionLocked;
+  DOM.moveStrikeBtn.disabled = !actionsEnabled;
+  DOM.moveHeavyBtn.disabled = !actionsEnabled;
+  DOM.moveGuardBtn.disabled = !actionsEnabled;
+  DOM.captureBtn.disabled = !actionsEnabled;
+  DOM.runBtn.disabled = !actionsEnabled;
+
   if (isBattle && gameState.battle.enemy) {
     DOM.enemyName.textContent = gameState.battle.enemy.name;
     DOM.enemyHp.textContent = gameState.battle.enemy.hp;
     DOM.enemyMaxHp.textContent = gameState.battle.enemy.maxHp;
-    DOM.playerHp.textContent = gameState.player.hp;
-    DOM.playerMaxHp.textContent = gameState.player.maxHp;
+    DOM.playerName.textContent = gameState.playerMonster.name;
+    DOM.playerHp.textContent = gameState.playerMonster.hp;
+    DOM.playerMaxHp.textContent = gameState.playerMonster.maxHp;
     DOM.battleLog.textContent = gameState.battle.log.join("\n");
   }
 }
@@ -384,20 +604,18 @@ function loop(ts) {
   requestAnimationFrame(loop);
 }
 
-function onKeyDown(e) {
-  gameState.keysDown[e.code] = true;
+function onKeyDown(event) {
+  gameState.keysDown[event.code] = true;
 
-  if (e.code === "Enter") {
-    if (gameState.phase === "start") {
-      startGame();
-    } else if (gameState.phase === "gameover") {
+  if (event.code === "Enter") {
+    if (gameState.phase === "start" || gameState.phase === "gameover") {
       startGame();
     }
   }
 }
 
-function onKeyUp(e) {
-  delete gameState.keysDown[e.code];
+function onKeyUp(event) {
+  delete gameState.keysDown[event.code];
 }
 
 function bindEvents() {
@@ -406,8 +624,11 @@ function bindEvents() {
 
   DOM.startBtn.addEventListener("click", startGame);
   DOM.restartBtn.addEventListener("click", startGame);
-  DOM.fightBtn.addEventListener("click", resolvePlayerFight);
-  DOM.runBtn.addEventListener("click", resolveRunAttempt);
+  DOM.moveStrikeBtn.addEventListener("click", () => useMove("strike"));
+  DOM.moveHeavyBtn.addEventListener("click", () => useMove("heavy"));
+  DOM.moveGuardBtn.addEventListener("click", () => useMove("guard"));
+  DOM.captureBtn.addEventListener("click", tryCapture);
+  DOM.runBtn.addEventListener("click", tryRun);
 }
 
 function init() {
